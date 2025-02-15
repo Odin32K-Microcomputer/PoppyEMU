@@ -1,0 +1,10 @@
+*
+!/src/
+!/src/**
+!/LICENSE
+!/Makefile
+!/README.md
+.**
+!/.github/
+!/.gitattributes
+!/.gitignore
