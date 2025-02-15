@@ -23,7 +23,7 @@ _CC := $(TOOLCHAIN)$(CC)
 _LD := $(TOOLCHAIN)$(LD)
 
 # flags for the C compiler (change the -std=... if you want)
-CFLAGS += -std=c11 -pedantic -Wall -Wextra -Wuninitialized -Wundef
+CFLAGS += -std=c11 -Wall -Wextra -Wuninitialized -Wundef
 # flags for the C preprocessor (put things like -DMYMACRO=... here)
 CPPFLAGS += 
 # flags for the linker
