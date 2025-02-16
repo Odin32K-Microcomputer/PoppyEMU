@@ -25,7 +25,7 @@ _LD := $(TOOLCHAIN)$(LD)
 # flags for the C compiler (change the -std=... if you want)
 CFLAGS += -std=c11 -Wall -Wextra -Wuninitialized -Wundef
 # flags for the C preprocessor (put things like -DMYMACRO=... here)
-CPPFLAGS += 
+CPPFLAGS += -D_DEFAULT_SOURCE
 # flags for the linker
 LDFLAGS += 
 # libraries to link to (put things like -lmylib here)
@@ -33,7 +33,8 @@ LDLIBS +=
 
 # add some more flags depending on if a debug build is wanted or not
 ifeq ($(DEBUG),y)
-    CFLAGS += -g -Og -fsanitize=address -Wdouble-promotion -Wconversion
+    CFLAGS += -g -Og -fsanitize=address -Wdouble-promotion
+    #CFLAGS += -Wconversion
     LDFLAGS += -fsanitize=address
 else
     CFLAGS += -O2
