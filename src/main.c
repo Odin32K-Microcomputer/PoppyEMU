@@ -16,7 +16,7 @@
     #define VERBOSE 3 /* 0-3 for amount of info */
     #define STEP 0 /* 1 to enable stepping mode, 0 to disable */
     #define WAIT_AT_BEGIN 1 /* 1 to wait at the beginning, 0 to immediately start */
-    #define CLOCK_SPEED 1 /* override for debugging */
+    #define CLOCK_SPEED 2 /* override for debugging */
 #endif
 
 /* Timing */
@@ -184,6 +184,8 @@ static void displayHelp(char* argv0) {
     printf("Usage: %s ROM0 [ROM1]\n", argv0);
 }
 
+static void loop(void);
+
 int main(int argc, char** argv) {
     puts("PoppyEMU - A research emulator for the Odin32K.");
 
@@ -237,113 +239,392 @@ int main(int argc, char** argv) {
     getTime(&targettime);
     #endif
 
+    loop();
+
+    #ifndef NDEBUG
+    printf("DEBUG: End execution.\n");
+    #endif
+}
+
+static void loop(void) {
     /* Begin reading instructions */
     /* Timing references: https://www.nesdev.org/6502_cpu.txt, https://www.masswerk.at/6502/6502_instruction_set.html */
     while (true) {
         #if VERBOSE == 1
-        printf("X  --  $%04X: ", registers.pc);
+            printf("X  --  $%04X: ", registers.pc);
+            #define VERBOSE_PREFIX ""
         #elif VERBOSE > 1
-        fputs("X  --  ", stdout);
+            #define VERBOSE_PREFIX "X  --  "
         #endif
         uint8_t ins1 = readByte(registers.pc++);
 
         switch (ins1) {
             /* TRANSFER */
-            case 0xA2: { /* LOAD X REGISTER, IMMEDIATE */
-                uint8_t ins2 = readByte(registers.pc++); /* Read in the byte and inc the program counter */
+            case 0xA9: { /* LOAD ACCUMULATOR, IMMEDIATE */
+                uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("LDX #$%02X\n", ins2);
+                printf(VERBOSE_PREFIX "LDA #$%02X\n", ins2);
+                #endif
+                registers.a = ins2;
+                ucodeSetZNFlags(registers.a, &registers.p);
+            } break;
+            case 0xA5: { /* LOAD ACCUMULATOR, ZEROPAGE */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDA $%02X\n", ins2);
+                #endif
+                registers.a = readByte(ins2);
+                ucodeSetZNFlags(registers.a, &registers.p);
+            } break;
+            case 0xB5: { /* LOAD ACCUMULATOR, ZEROPAGE,X */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDA $%02X,X\n", ins2);
+                #endif
+                readByte(ins2);
+                ins2 += registers.x;
+                registers.a = readByte(ins2);
+                ucodeSetZNFlags(registers.a, &registers.p);
+            } break;
+            case 0xAD: { /* LOAD ACCUMULATOR, ABSOLUTE */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc++) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDA $%04X\n", ins23);
+                #endif
+                registers.a = readByte(ins23);
+                ucodeSetZNFlags(registers.a, &registers.p);
+            } break;
+            case 0xBD: { /* LOAD ACCUMULATOR, ABSOLUTE,X */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDA $%04X,X\n", ins23);
+                #endif
+                uint16_t ins23x = ins23 + registers.x;
+                if ((ins23x & 0xFF00) != (ins23 & 0xFF00)) readByte(registers.pc);
+                ++registers.pc;
+                registers.a = readByte(ins23x);
+                ucodeSetZNFlags(registers.a, &registers.p);
+            } break;
+            case 0xB9: { /* LOAD ACCUMULATOR, ABSOLUTE,Y */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDA $%04X,Y\n", ins23);
+                #endif
+                uint16_t ins23y = ins23 + registers.y;
+                if ((ins23y & 0xFF00) != (ins23 & 0xFF00)) readByte(registers.pc);
+                registers.a = readByte(ins23y);
+                ucodeSetZNFlags(registers.a, &registers.p);
+            } break;
+            case 0xA1: { /* LOAD ACCUMULATOR, (INDIRECT,X) */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDA ($%02X,X)\n", ins2);
+                #endif
+                readByte(ins2);
+                ins2 += registers.x;
+                uint16_t addr = readByte(ins2++);
+                addr |= (uint16_t)readByte(ins2) << 8;
+                registers.a = readByte(addr);
+                ucodeSetZNFlags(registers.a, &registers.p);
+            } break;
+            case 0xB1: { /* LOAD ACCUMULATOR, (INDIRECT),Y */
+                uint8_t ins2 = readByte(registers.pc);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDA ($%02X),Y\n", ins2);
+                #endif
+                uint16_t addr = readByte(ins2++);
+                addr |= (uint16_t)readByte(ins2) << 8;
+                uint16_t addry = addr + registers.y;
+                if ((addry & 0xFF00) != (addr & 0xFF00)) readByte(registers.pc);
+                ++registers.pc;
+                registers.a = readByte(addry);
+                ucodeSetZNFlags(registers.a, &registers.p);
+            } break;
+            case 0xA2: { /* LOAD X REGISTER, IMMEDIATE */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDX #$%02X\n", ins2);
                 #endif
                 registers.x = ins2;
-                ucodeSetZNFlags(ins2, &registers.p);
+                ucodeSetZNFlags(registers.x, &registers.p);
             } break;
             case 0xA6: { /* LOAD X REGISTER, ZEROPAGE */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("LDX $%02X\n", ins2);
+                printf(VERBOSE_PREFIX "LDX $%02X\n", ins2);
                 #endif
                 registers.x = readByte(ins2);
-                ucodeSetZNFlags(ins2, &registers.p);
+                ucodeSetZNFlags(registers.x, &registers.p);
             } break;
-
             case 0xB6: { /* LOAD X REGISTER, ZEROPAGE,Y */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("LDX $%02X,Y\n", ins2);
+                printf(VERBOSE_PREFIX "LDX $%02X,Y\n", ins2);
                 #endif
-                registers.x = readByte(ins2) + registers.y;
-                ucodeSetZNFlags(ins2, &registers.p);
-                waitForCycles(1);
+                readByte(ins2);
+                ins2 += registers.y;
+                registers.x = readByte(ins2);
+                ucodeSetZNFlags(registers.x, &registers.p);
+            } break;
+            case 0xAE: { /* LOAD X REGISTER, ABSOLUTE */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc++) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDX $%04X\n", ins23);
+                #endif
+                registers.x = readByte(ins23);
+                ucodeSetZNFlags(registers.x, &registers.p);
+            } break;
+            case 0xBE: { /* LOAD X REGISTER, ABSOLUTE,Y */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDX $%04X,Y\n", ins23);
+                #endif
+                uint16_t ins23y = ins23 + registers.y;
+                if ((ins23y & 0xFF00) != (ins23 & 0xFF00)) readByte(registers.pc);
+                registers.x = readByte(ins23y);
+                ucodeSetZNFlags(registers.x, &registers.p);
+            } break;
+            case 0xA0: { /* LOAD Y REGISTER, IMMEDIATE */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDY #$%02X\n", ins2);
+                #endif
+                registers.y = ins2;
+                ucodeSetZNFlags(registers.y, &registers.p);
+            } break;
+            case 0xA4: { /* LOAD Y REGISTER, ZEROPAGE */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDY $%02X\n", ins2);
+                #endif
+                registers.y = readByte(ins2);
+                ucodeSetZNFlags(registers.y, &registers.p);
+            } break;
+            case 0xB4: { /* LOAD Y REGISTER, ZEROPAGE,X */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDY $%02X,X\n", ins2);
+                #endif
+                readByte(ins2);
+                ins2 += registers.x;
+                registers.y = readByte(ins2);
+                ucodeSetZNFlags(registers.y, &registers.p);
+            } break;
+            case 0xAC: { /* LOAD Y REGISTER, ABSOLUTE */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc++) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDY $%04X\n", ins23);
+                #endif
+                registers.y = readByte(ins23);
+                ucodeSetZNFlags(registers.y, &registers.p);
+            } break;
+            case 0xBC: { /* LOAD Y REGISTER, ABSOLUTE,X */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "LDY $%04X,X\n", ins23);
+                #endif
+                uint16_t ins23x = ins23 + registers.x;
+                if ((ins23x & 0xFF00) != (ins23 & 0xFF00)) readByte(registers.pc);
+                ++registers.pc;
+                registers.y = readByte(ins23x);
+                ucodeSetZNFlags(registers.y, &registers.p);
+            } break;
+            case 0x85: { /* STORE ACCUMULATOR, ZEROPAGE */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STA $%02X\n", ins2);
+                #endif
+                writeByte(ins2, registers.a);
+            } break;
+            case 0x95: { /* STORE ACCUMULATOR, ZEROPAGE,X */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STA $%02X,X\n", ins2);
+                #endif
+                readByte(ins2);
+                ins2 += registers.x;
+                writeByte(ins2, registers.a);
+            } break;
+            case 0x8D: { /* STORE ACCUMULATOR, ABSOLUTE */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc++) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STA $%04X\n", ins23);
+                #endif
+                writeByte(ins23, registers.a);
+            } break;
+            case 0x9D: { /* STORE ACCUMULATOR, ABSOLUTE,X */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STA $%04X,X\n", ins23);
+                #endif
+                uint16_t ins23x = ins23 + registers.x;
+                readByte(registers.pc++);
+                writeByte(ins23x, registers.a);
+            } break;
+            case 0x99: { /* STORE ACCUMULATOR, ABSOLUTE,Y */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STA $%04X,X\n", ins23);
+                #endif
+                uint16_t ins23y = ins23 + registers.y;
+                readByte(registers.pc++);
+                writeByte(ins23y, registers.a);
+            } break;
+            case 0x81: { /* STORE ACCUMULATOR, (INDIRECT,X) */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STA ($%02X,X)\n", ins2);
+                #endif
+                readByte(ins2);
+                ins2 += registers.x;
+                uint16_t addr = readByte(ins2++);
+                addr |= (uint16_t)readByte(ins2) << 8;
+                writeByte(addr, registers.a);
+            } break;
+            case 0x91: { /* STORE ACCUMULATOR, (INDIRECT),Y */
+                uint8_t ins2 = readByte(registers.pc);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STA ($%02X),Y\n", ins2);
+                #endif
+                uint16_t addr = readByte(ins2++);
+                addr |= (uint16_t)readByte(ins2) << 8;
+                uint16_t addry = addr + registers.y;
+                readByte(registers.pc++);
+                writeByte(addry, registers.a);
+            } break;
+            case 0x86: { /* STORE X REGISTER, ZEROPAGE */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STX $%02X\n", ins2);
+                #endif
+                writeByte(ins2, registers.x);
+            } break;
+            case 0x96: { /* STORE X REGISTER, ZEROPAGE,Y */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STX $%02X,Y\n", ins2);
+                #endif
+                readByte(ins2);
+                ins2 += registers.y;
+                writeByte(ins2, registers.x);
+            } break;
+            case 0x8E: { /* STORE X REGISTER, ABSOLUTE */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc++) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STX $%04X\n", ins23);
+                #endif
+                writeByte(ins23, registers.x);
+            } break;
+            case 0x84: { /* STORE Y REGISTER, ZEROPAGE */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STY $%02X\n", ins2);
+                #endif
+                writeByte(ins2, registers.y);
+            } break;
+            case 0x94: { /* STORE Y REGISTER, ZEROPAGE,X */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STY $%02X,X\n", ins2);
+                #endif
+                readByte(ins2);
+                ins2 += registers.x;
+                writeByte(ins2, registers.y);
+            } break;
+            case 0x8C: { /* STORE Y REGISTER, ABSOLUTE */
+                uint16_t ins23 = readByte(registers.pc++);
+                ins23 |= (uint16_t)readByte(registers.pc++) << 8;
+                #if VERBOSE
+                printf(VERBOSE_PREFIX "STY $%04X\n", ins23);
+                #endif
+                writeByte(ins23, registers.y);
             } break;
             case 0xAA: { /* TRANSFER ACCUMULATOR TO X REGISTER, IMPLIED */
                 #if VERBOSE
-                puts("TAX");
+                puts(VERBOSE_PREFIX "TAX");
                 #endif
                 readByte(registers.pc);
                 registers.x = registers.a;
+                ucodeSetZNFlags(registers.x, &registers.p);
             } break;
             case 0xA8: { /* TRANSFER ACCUMULATOR TO Y REGISTER, IMPLIED */
                 #if VERBOSE
-                puts("TAY");
+                puts(VERBOSE_PREFIX "TAY");
                 #endif
                 readByte(registers.pc);
                 registers.y = registers.a;
+                ucodeSetZNFlags(registers.y, &registers.p);
             } break;
             case 0xBA: { /* TRANSFER STACK POINTER TO X REGISTER, IMPLIED */
                 #if VERBOSE
-                puts("TSX");
+                puts(VERBOSE_PREFIX "TSX");
                 #endif
                 readByte(registers.pc);
                 registers.x = registers.sp;
+                ucodeSetZNFlags(registers.x, &registers.p);
             } break;
             case 0x8A: { /* TRANSFER X REGISTER TO ACCUMULATOR, IMPLIED */
                 #if VERBOSE
-                puts("TXA");
+                puts(VERBOSE_PREFIX "TXA");
                 #endif
                 readByte(registers.pc);
                 registers.a = registers.x;
+                ucodeSetZNFlags(registers.a, &registers.p);
             } break;
             case 0x9A: { /* TRANSFER X REGISTER TO STACK POINTER, IMPLIED */
                 #if VERBOSE
-                puts("TXS");
+                puts(VERBOSE_PREFIX "TXS");
                 #endif
                 readByte(registers.pc);
                 registers.sp = registers.x;
             } break;
             case 0x98: { /* TRANSFER Y REGISTER TO ACCUMULATOR, IMPLIED */
                 #if VERBOSE
-                puts("TYA");
+                puts(VERBOSE_PREFIX "TYA");
                 #endif
                 readByte(registers.pc);
                 registers.a = registers.y;
+                ucodeSetZNFlags(registers.a, &registers.p);
             } break;
 
             /* STACK */
-            case 0x48: {
+            case 0x48: { /* PUSH ACCUMULATOR, IMPLIED */
                 #if VERBOSE
-                puts("PHA");
+                puts(VERBOSE_PREFIX "PHA");
                 #endif
                 readByte(registers.pc);
                 ucodePush(&registers.sp, registers.a);
             } break;
-            case 0x08: {
+            case 0x08: { /* PUSH STATUS FLAGS, IMPLIED */
                 #if VERBOSE
-                puts("PHP");
+                puts(VERBOSE_PREFIX "PHP");
                 #endif
                 readByte(registers.pc);
                 ucodePush(&registers.sp, registers.p | FLAG_BREAK | FLAG_ONE);
             } break;
-            case 0x68: {
+            case 0x68: { /* POP ACCUMULATOR, IMPLIED */
                 #if VERBOSE
-                puts("PLA");
+                puts(VERBOSE_PREFIX "PLA");
                 #endif
                 readByte(registers.pc);
                 readByte(0x0100 | registers.sp);
                 registers.a = ucodePop(&registers.sp);
+                ucodeSetZNFlags(registers.a, &registers.p);
             } break;
-            case 0x28: {
+            case 0x28: { /* POP STATUS FLAGS, IMPLIED */
                 #if VERBOSE
-                puts("PLP");
+                puts(VERBOSE_PREFIX "PLP");
                 #endif
                 readByte(registers.pc);
                 readByte(0x0100 | registers.sp);
@@ -354,7 +635,7 @@ int main(int argc, char** argv) {
             case 0xE6: { /* INCREMENT MEMORY, ZEROPAGE */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("INC $%02X\n", ins2);
+                printf(VERBOSE_PREFIX "INC $%02X\n", ins2);
                 #endif
                 readByte(ins2);
                 uint8_t value = readByte(ins2);
@@ -365,7 +646,7 @@ int main(int argc, char** argv) {
             case 0xF6: { /* INCREMENT MEMORY, ZEROPAGE,X */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("INC $%02X,X\n", ins2);
+                printf(VERBOSE_PREFIX "INC $%02X,X\n", ins2);
                 #endif
                 readByte(ins2);
                 readByte(ins2);
@@ -379,7 +660,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc++) << 8;
                 #if VERBOSE
-                printf("INC $%04X\n", ins23);
+                printf(VERBOSE_PREFIX "INC $%04X\n", ins23);
                 #endif
                 readByte(ins23);
                 uint8_t value = readByte(ins23);
@@ -389,13 +670,14 @@ int main(int argc, char** argv) {
             } break;
             case 0xFE: { /* INCREMENT MEMORY, ABSOLUTE,X */
                 uint16_t ins23 = readByte(registers.pc++);
-                ins23 |= (uint16_t)readByte(registers.pc++) << 8;
+                ins23 |= (uint16_t)readByte(registers.pc) << 8;
                 #if VERBOSE
-                printf("INC $%04X,X\n", ins23);
+                printf(VERBOSE_PREFIX "INC $%04X,X\n", ins23);
                 #endif
                 readByte(ins23);
                 uint16_t ins23x = ins23 + registers.x;
                 if ((ins23x & 0xFF00) != (ins23 & 0xFF00)) readByte(registers.pc);
+                ++registers.pc;
                 uint8_t value = readByte(ins23x);
                 ++value;
                 ucodeSetZNFlags(value, &registers.p);
@@ -403,7 +685,7 @@ int main(int argc, char** argv) {
             } break;
             case 0xE8: { /* INCREMENT X REGISTER, IMPLIED */
                 #if VERBOSE
-                puts("INX");
+                puts(VERBOSE_PREFIX "INX");
                 #endif
                 readByte(registers.pc);
                 ++registers.x;
@@ -411,7 +693,7 @@ int main(int argc, char** argv) {
             } break;
             case 0xC8: { /* INCREMENT Y REGISTER, IMPLIED */
                 #if VERBOSE
-                puts("INY");
+                puts(VERBOSE_PREFIX "INY");
                 #endif
                 readByte(registers.pc);
                 ++registers.y;
@@ -420,7 +702,7 @@ int main(int argc, char** argv) {
             case 0xC6: { /* DECREMENT MEMORY, ZEROPAGE */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("DEC $%02X\n", ins2);
+                printf(VERBOSE_PREFIX "DEC $%02X\n", ins2);
                 #endif
                 readByte(ins2);
                 uint8_t value = readByte(ins2);
@@ -431,7 +713,7 @@ int main(int argc, char** argv) {
             case 0xD6: { /* DECREMENT MEMORY, ZEROPAGE,X */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("DEC $%02X,X\n", ins2);
+                printf(VERBOSE_PREFIX "DEC $%02X,X\n", ins2);
                 #endif
                 readByte(ins2);
                 readByte(ins2);
@@ -445,7 +727,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc++) << 8;
                 #if VERBOSE
-                printf("DEC $%04X\n", ins23);
+                printf(VERBOSE_PREFIX "DEC $%04X\n", ins23);
                 #endif
                 readByte(ins23);
                 uint8_t value = readByte(ins23);
@@ -455,13 +737,14 @@ int main(int argc, char** argv) {
             } break;
             case 0xDE: { /* DECREMENT MEMORY, ABSOLUTE,X */
                 uint16_t ins23 = readByte(registers.pc++);
-                ins23 |= (uint16_t)readByte(registers.pc++) << 8;
+                ins23 |= (uint16_t)readByte(registers.pc) << 8;
                 #if VERBOSE
-                printf("DEC $%04X,X\n", ins23);
+                printf(VERBOSE_PREFIX "DEC $%04X,X\n", ins23);
                 #endif
                 readByte(ins23);
                 uint16_t ins23x = ins23 + registers.x;
                 if ((ins23x & 0xFF00) != (ins23 & 0xFF00)) readByte(registers.pc);
+                ++registers.pc;
                 uint8_t value = readByte(ins23x);
                 --value;
                 ucodeSetZNFlags(value, &registers.p);
@@ -469,7 +752,7 @@ int main(int argc, char** argv) {
             } break;
             case 0xCA: { /* DECREMENT X REGISTER, IMPLIED */
                 #if VERBOSE
-                puts("DEX");
+                puts(VERBOSE_PREFIX "DEX");
                 #endif
                 readByte(registers.pc);
                 --registers.x;
@@ -477,7 +760,7 @@ int main(int argc, char** argv) {
             } break;
             case 0x88: { /* DECREMENT Y REGISTER, IMPLIED */
                 #if VERBOSE
-                puts("DEY");
+                puts(VERBOSE_PREFIX "DEY");
                 #endif
                 readByte(registers.pc);
                 --registers.y;
@@ -488,21 +771,21 @@ int main(int argc, char** argv) {
             case 0x69: { /* ADD WITH CARRY TO ACCUMULATOR, IMMEDIATE */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("ADC #$%02X\n", ins2);
+                printf(VERBOSE_PREFIX "ADC #$%02X\n", ins2);
                 #endif
                 registers.a = ucodeAddWithCarry(registers.a, ins2, &registers.p);
             } break;
             case 0x65: { /* ADD WITH CARRY TO ACCUMULATOR, ZEROPAGE */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("ADC $%02X\n", ins2);
+                printf(VERBOSE_PREFIX "ADC $%02X\n", ins2);
                 #endif
                 registers.a = ucodeAddWithCarry(registers.a, readByte(ins2), &registers.p);
             } break;
             case 0x75: { /* ADD WITH CARRY TO ACCUMULATOR, ZEROPAGE,X */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("ADC $%02X,X\n", ins2);
+                printf(VERBOSE_PREFIX "ADC $%02X,X\n", ins2);
                 #endif
                 readByte(ins2);
                 ins2 += registers.x;
@@ -512,7 +795,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc++) << 8;
                 #if VERBOSE
-                printf("ADC $%04X\n", ins23);
+                printf(VERBOSE_PREFIX "ADC $%04X\n", ins23);
                 #endif
                 registers.a = ucodeAddWithCarry(registers.a, readByte(ins23), &registers.p);
             } break;
@@ -520,7 +803,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc) << 8;
                 #if VERBOSE
-                printf("ADC $%04X,X\n", ins23);
+                printf(VERBOSE_PREFIX "ADC $%04X,X\n", ins23);
                 #endif
                 uint16_t ins23x = ins23 + registers.x;
                 if ((ins23x & 0xFF00) != (ins23 & 0xFF00)) readByte(registers.pc);
@@ -531,7 +814,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc) << 8;
                 #if VERBOSE
-                printf("ADC $%04X,Y\n", ins23);
+                printf(VERBOSE_PREFIX "ADC $%04X,Y\n", ins23);
                 #endif
                 uint16_t ins23y = ins23 + registers.y;
                 if ((ins23y & 0xFF00) != (ins23 & 0xFF00)) readByte(registers.pc);
@@ -541,7 +824,7 @@ int main(int argc, char** argv) {
             case 0x61: { /* ADD WITH CARRY TO ACCUMULATOR, (INDIRECT,X) */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("ADC ($%02X,X)\n", ins2);
+                printf(VERBOSE_PREFIX "ADC ($%02X,X)\n", ins2);
                 #endif
                 readByte(ins2);
                 ins2 += registers.x;
@@ -552,7 +835,7 @@ int main(int argc, char** argv) {
             case 0x71: { /* ADD WITH CARRY TO ACCUMULATOR, (INDIRECT),Y */
                 uint8_t ins2 = readByte(registers.pc);
                 #if VERBOSE
-                printf("ADC ($%02X),Y\n", ins2);
+                printf(VERBOSE_PREFIX "ADC ($%02X),Y\n", ins2);
                 #endif
                 uint16_t addr = readByte(ins2++);
                 addr |= (uint16_t)readByte(ins2) << 8;
@@ -564,7 +847,7 @@ int main(int argc, char** argv) {
             case 0x72: { /* ADD WITH CARRY TO ACCUMULATOR, (ZEROPAGE) */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("ADC ($%02X)\n", ins2);
+                printf(VERBOSE_PREFIX "ADC ($%02X)\n", ins2);
                 #endif
                 uint16_t addr = readByte(ins2++);
                 addr |= (uint16_t)readByte(ins2) << 8;
@@ -573,21 +856,21 @@ int main(int argc, char** argv) {
             case 0xE9: { /* SUBTRACT WITH BORROW FROM ACCUMULATOR, IMMEDIATE */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("SBC #$%02X\n", ins2);
+                printf(VERBOSE_PREFIX "SBC #$%02X\n", ins2);
                 #endif
                 registers.a = ucodeSubWithCarry(registers.a, ins2, &registers.p);
             } break;
             case 0xE5: { /* SUBTRACT WITH BORROW FROM ACCUMULATOR, ZEROPAGE */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("SBC $%02X\n", ins2);
+                printf(VERBOSE_PREFIX "SBC $%02X\n", ins2);
                 #endif
                 registers.a = ucodeSubWithCarry(registers.a, readByte(ins2), &registers.p);
             } break;
             case 0xF5: { /* SUBTRACT WITH BORROW FROM ACCUMULATOR, ZEROPAGE,X */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("SBC $%02X,X\n", ins2);
+                printf(VERBOSE_PREFIX "SBC $%02X,X\n", ins2);
                 #endif
                 readByte(ins2);
                 ins2 += registers.x;
@@ -597,7 +880,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc++) << 8;
                 #if VERBOSE
-                printf("SBC $%04X\n", ins23);
+                printf(VERBOSE_PREFIX "SBC $%04X\n", ins23);
                 #endif
                 registers.a = ucodeSubWithCarry(registers.a, readByte(ins23), &registers.p);
             } break;
@@ -605,7 +888,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc) << 8;
                 #if VERBOSE
-                printf("SBC $%04X,X\n", ins23);
+                printf(VERBOSE_PREFIX "SBC $%04X,X\n", ins23);
                 #endif
                 uint16_t ins23x = ins23 + registers.x;
                 if ((ins23x & 0xFF00) != (ins23 & 0xFF00)) readByte(registers.pc);
@@ -616,7 +899,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc) << 8;
                 #if VERBOSE
-                printf("SBC $%04X,Y\n", ins23);
+                printf(VERBOSE_PREFIX "SBC $%04X,Y\n", ins23);
                 #endif
                 uint16_t ins23y = ins23 + registers.y;
                 if ((ins23y & 0xFF00) != (ins23 & 0xFF00)) readByte(registers.pc);
@@ -626,7 +909,7 @@ int main(int argc, char** argv) {
             case 0xE1: { /* SUBTRACT WITH BORROW FROM ACCUMULATOR, (INDIRECT,X) */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("SBC ($%02X,X)\n", ins2);
+                printf(VERBOSE_PREFIX "SBC ($%02X,X)\n", ins2);
                 #endif
                 readByte(ins2);
                 ins2 += registers.x;
@@ -637,7 +920,7 @@ int main(int argc, char** argv) {
             case 0xF1: { /* SUBTRACT WITH BORROW FROM ACCUMULATOR, (INDIRECT),Y */
                 uint8_t ins2 = readByte(registers.pc);
                 #if VERBOSE
-                printf("SBC ($%02X),Y\n", ins2);
+                printf(VERBOSE_PREFIX "SBC ($%02X),Y\n", ins2);
                 #endif
                 uint16_t addr = readByte(ins2++);
                 addr |= (uint16_t)readByte(ins2) << 8;
@@ -649,7 +932,7 @@ int main(int argc, char** argv) {
             case 0xF2: { /* SUBTRACT WITH BORROW FROM ACCUMULATOR, (ZEROPAGE) */
                 uint8_t ins2 = readByte(registers.pc++);
                 #if VERBOSE
-                printf("ADC ($%02X)\n", ins2);
+                printf(VERBOSE_PREFIX "ADC ($%02X)\n", ins2);
                 #endif
                 uint16_t addr = readByte(ins2++);
                 addr |= (uint16_t)readByte(ins2) << 8;
@@ -663,49 +946,49 @@ int main(int argc, char** argv) {
             /* FLAG */
             case 0x18: { /* CLEAR CARRY FLAG, IMPLIED */
                 #if VERBOSE
-                puts("CLC");
+                puts(VERBOSE_PREFIX "CLC");
                 #endif
                 readByte(registers.pc);
                 registers.p &= ~FLAG_CARRY;
             } break;
             case 0xD8: { /* CLEAR DECIMAL MODE FLAG, IMPLIED */
                 #if VERBOSE
-                puts("CLD");
+                puts(VERBOSE_PREFIX "CLD");
                 #endif
                 readByte(registers.pc);
                 registers.p &= ~FLAG_DECIMAL;
             } break;
             case 0x58: { /* CLEAR INTERRUPT DISABLE FLAG, IMPLIED */
                 #if VERBOSE
-                puts("CLI");
+                puts(VERBOSE_PREFIX "CLI");
                 #endif
                 readByte(registers.pc);
                 registers.p &= ~FLAG_IRQDISABLE;
             } break;
             case 0xB8: { /* CLEAR OVERFLOW FLAG, IMPLIED */
                 #if VERBOSE
-                puts("CLV");
+                puts(VERBOSE_PREFIX "CLV");
                 #endif
                 readByte(registers.pc);
                 registers.p &= ~FLAG_OVERFLOW;
             } break;
             case 0x38: { /* SET CARRY FLAG, IMPLIED */
                 #if VERBOSE
-                puts("SEC");
+                puts(VERBOSE_PREFIX "SEC");
                 #endif
                 readByte(registers.pc);
                 registers.p |= FLAG_CARRY;
             } break;
             case 0xF8: { /* SET DECIMAL MODE FLAG, IMPLIED */
                 #if VERBOSE
-                puts("SED");
+                puts(VERBOSE_PREFIX "SED");
                 #endif
                 readByte(registers.pc);
                 registers.p |= FLAG_DECIMAL;
             } break;
             case 0x78: { /* SET INTERRUPT DISABLE FLAG, IMPLIED */
                 #if VERBOSE
-                puts("SEI");
+                puts(VERBOSE_PREFIX "SEI");
                 #endif
                 readByte(registers.pc);
                 registers.p |= FLAG_IRQDISABLE;
@@ -720,7 +1003,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc++) << 8;
                 #if VERBOSE
-                printf("JMP $%04X\n", ins23);
+                printf(VERBOSE_PREFIX "JMP $%04X\n", ins23);
                 #endif
                 registers.pc = ins23;
             } break;
@@ -728,7 +1011,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc) << 8;
                 #if VERBOSE
-                printf("JMP ($%04X)\n", ins23);
+                printf(VERBOSE_PREFIX "JMP ($%04X)\n", ins23);
                 #endif
                 readByte(ins23);
                 uint16_t addr = readByte(ins23++);
@@ -739,7 +1022,7 @@ int main(int argc, char** argv) {
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc) << 8;
                 #if VERBOSE
-                printf("JMP ($%04X,X)\n", ins23);
+                printf(VERBOSE_PREFIX "JMP ($%04X,X)\n", ins23);
                 #endif
                 readByte(ins23);
                 ins23 += registers.x;
@@ -754,13 +1037,13 @@ int main(int argc, char** argv) {
                 ucodePush(&registers.sp, registers.pc);
                 ins23 |= (uint16_t)readByte(registers.pc) << 8;
                 #if VERBOSE
-                printf("JSR $%04X\n", ins23);
+                printf(VERBOSE_PREFIX "JSR $%04X\n", ins23);
                 #endif
                 registers.pc = ins23;
             } break;
             case 0x60: { /* RETURN FROM SUBROUTINE, IMPLIED */
                 #if VERBOSE
-                puts("RTS");
+                puts(VERBOSE_PREFIX "RTS");
                 #endif
                 readByte(registers.pc);
                 readByte(0x0100 | registers.sp);
@@ -772,7 +1055,7 @@ int main(int argc, char** argv) {
             /* INTERRUPTS */
             case 0x00: { /* BREAK, IMPLIED */
                 #if VERBOSE
-                puts("BRK");
+                puts(VERBOSE_PREFIX "BRK");
                 #endif
                 readByte(registers.pc++);
                 ucodePush(&registers.sp, registers.pc >> 8);
@@ -783,7 +1066,7 @@ int main(int argc, char** argv) {
             } break;
             case 0x40: { /* RETURN FROM INTERRUPT, IMPLIED */
                 #if VERBOSE
-                puts("RTI");
+                puts(VERBOSE_PREFIX "RTI");
                 #endif
                 readByte(registers.pc);
                 readByte(0x0100 | registers.sp);
@@ -795,7 +1078,7 @@ int main(int argc, char** argv) {
             /* OTHER */
             case 0xEA: { /* NO OPERATION */
                 #if VERBOSE
-                puts("NOP");
+                puts(VERBOSE_PREFIX "NOP");
                 #endif
                 readByte(registers.pc);
             } break;
@@ -803,7 +1086,7 @@ int main(int argc, char** argv) {
             /* ILLEGAL */
             default: { /* 1 BYTE, 1 CYCLE */
                 #if VERBOSE
-                printf("ILLEGAL 0x%02X (1 byte 1 cycle NOP)\n", ins1);
+                printf(VERBOSE_PREFIX "ILLEGAL 0x%02X (1 byte 1 cycle NOP)\n", ins1);
                 #endif
             } break;
             case 0x02:
@@ -814,13 +1097,13 @@ int main(int argc, char** argv) {
             case 0xC2:
             case 0xE2: { /* 2 BYTES, 2 CYCLES */
                 #if VERBOSE
-                printf("ILLEGAL 0x%02X (2 byte 2 cycle NOP)\n", ins1);
+                printf(VERBOSE_PREFIX "ILLEGAL 0x%02X (2 byte 2 cycle NOP)\n", ins1);
                 #endif
                 readByte(registers.pc++);
             } break;
             case 0x44: { /* 2 BYTES, 3 CYCLES */
                 #if VERBOSE
-                printf("ILLEGAL 0x%02X (2 byte 3 cycle NOP)\n", ins1);
+                printf(VERBOSE_PREFIX "ILLEGAL 0x%02X (2 byte 3 cycle NOP)\n", ins1);
                 #endif
                 uint8_t ins2 = readByte(registers.pc++);
                 readByte(ins2);
@@ -829,7 +1112,7 @@ int main(int argc, char** argv) {
             case 0xD4:
             case 0xF4: { /* 2 BYTES, 4 CYCLES */
                 #if VERBOSE
-                printf("ILLEGAL 0x%02X (2 byte 4 cycle NOP)\n", ins1);
+                printf(VERBOSE_PREFIX "ILLEGAL 0x%02X (2 byte 4 cycle NOP)\n", ins1);
                 #endif
                 uint8_t ins2 = readByte(registers.pc++);
                 readByte(ins2);
@@ -839,7 +1122,7 @@ int main(int argc, char** argv) {
             case 0xDC:
             case 0xFC: { /* 3 BYTES, 4 CYCLES */
                 #if VERBOSE
-                printf("ILLEGAL 0x%02X (3 byte 4 cycle NOP)\n", ins1);
+                printf(VERBOSE_PREFIX "ILLEGAL 0x%02X (3 byte 4 cycle NOP)\n", ins1);
                 #endif
                 uint16_t ins23 = readByte(registers.pc++);
                 ins23 |= (uint16_t)readByte(registers.pc) << 8;
@@ -849,7 +1132,7 @@ int main(int argc, char** argv) {
             } break;
             case 0x5C: { /* 3 BYTES, 8 CYCLES */
                 #if VERBOSE
-                printf("ILLEGAL 0x%02X (3 byte 8 cycle NOP)\n", ins1);
+                printf(VERBOSE_PREFIX "ILLEGAL 0x%02X (3 byte 8 cycle NOP)\n", ins1);
                 #endif
                 readByte(registers.pc++);
                 readByte(registers.pc++);
@@ -868,8 +1151,4 @@ int main(int argc, char** argv) {
         getTime(&targettime);
         #endif
     }
-    #ifndef NDEBUG
-    printf("DEBUG: End execution.\n");
-    #endif
 }
-
