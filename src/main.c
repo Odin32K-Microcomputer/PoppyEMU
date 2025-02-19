@@ -13,10 +13,10 @@
     #define STEP 0
     #define WAIT_AT_BEGIN 0
 #else
-    #define VERBOSE 1 /* 0-3 for amount of info */
+    #define VERBOSE 3 /* 0-3 for amount of info */
     #define STEP 0 /* 1 to enable stepping mode, 0 to disable */
     #define WAIT_AT_BEGIN 1 /* 1 to wait at the beginning, 0 to immediately start */
-    #define CLOCK_SPEED 8 /* override for debugging */
+    #define CLOCK_SPEED 1 /* override for debugging */
 #endif
 
 /* Timing */
@@ -254,8 +254,26 @@ int main(int argc, char** argv) {
                 #if VERBOSE
                 printf("LDX #$%02X\n", ins2);
                 #endif
-                ucodeSetZNFlags(ins2, &registers.p);
                 registers.x = ins2;
+                ucodeSetZNFlags(ins2, &registers.p);
+            } break;
+            case 0xA6: { /* LOAD X REGISTER, ZEROPAGE */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf("LDX $%02X\n", ins2);
+                #endif
+                registers.x = readByte(ins2);
+                ucodeSetZNFlags(ins2, &registers.p);
+            } break;
+
+            case 0xB6: { /* LOAD X REGISTER, ZEROPAGE,Y */
+                uint8_t ins2 = readByte(registers.pc++);
+                #if VERBOSE
+                printf("LDX $%02X,Y\n", ins2);
+                #endif
+                registers.x = readByte(ins2) + registers.y;
+                ucodeSetZNFlags(ins2, &registers.p);
+                waitForCycles(1);
             } break;
             case 0xAA: { /* TRANSFER ACCUMULATOR TO X REGISTER, IMPLIED */
                 #if VERBOSE
