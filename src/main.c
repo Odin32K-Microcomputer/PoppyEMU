@@ -16,7 +16,7 @@
     #define VERBOSE 3 /* 0-3 for amount of info */
     #define STEP 0 /* 1 to enable stepping mode, 0 to disable */
     #define WAIT_AT_BEGIN 1 /* 1 to wait at the beginning, 0 to immediately start */
-    #define CLOCK_SPEED 2 /* override for debugging */
+    #define CLOCK_SPEED 4 /* override for debugging */
 #endif
 
 /* Timing */

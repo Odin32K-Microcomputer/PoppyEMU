@@ -100,4 +100,4 @@ distclean: clean
 	@$(call rm,$(TARGET))
 
 # specify the phony rules (this means they don't correlate to actual files like real rules)
-.PHONY: build clean distclean
+.PHONY: default build clean distclean
